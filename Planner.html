@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planner Bariátrico Interativo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chosen Palette: Warm Neutral Harmony -->
+    <!-- Application Structure Plan: A SPA com duas seções principais (abas): "Pré-Cirurgia (Despertar)" e "Pós-Operatório (Florescer)", controladas por JS. A estrutura foi escolhida para separar claramente as duas fases distintas da jornada. "Despertar" foca em planejamento e checklists (formulários e tabelas dinâmicas) e feedback emocional via LLM. "Florescer" é um dashboard focado em data-logging (formulários de entrada), visualização de dados (gráficos de linha dinâmicos) e análise de correlação dos logs via LLM. O fluxo do usuário é: 1. Navegar entre as fases. 2. Registrar dados. 3. Usar os botões LLM para obter insights personalizados. 4. Visualizar a evolução. -->
+    <!-- Visualization & Content Choices: [Info: Controle de Peso/Medidas -> Goal: Rastrear mudança -> Viz: 2 Gráficos de Linha (Chart.js/Canvas) -> Interaction: Formulário adiciona dados ao array JS, que atualiza os gráficos -> Justification: Melhor método para tendências de tempo. | Info: Consultas, Tarefas, Diários (Alimentar/Emocional) -> Goal: Organizar/Registrar -> Viz: Tabelas HTML -> Interaction: Formulários adicionam novas linhas (<tr>) às tabelas via JS DOM -> Justification: Transforma o planner estático em uma ferramenta de log interativa. | Info: Reflexões, Metas -> Goal: Informar/Registrar/Gerar Feedback -> Viz: <textarea> e Bloco de Resultados LLM -> Interaction: Botão LLM coleta dados de reflexão e gera sugestões de preparo. | Info: Logs Alimentar/Emocional -> Goal: Analisar correlações -> Viz: Bloco de Resultados LLM -> Interaction: Botão LLM coleta logs para análise de tendências e sugestões de foco.] -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        :root {
+            --bg-cream: #fdfaf6;
+            --header-text: #047857; /* emerald-700 */
+            --body-text: #374151; /* gray-700 */
+            --accent: #10b981; /* emerald-500 */
+            --accent-dark: #059669; /* emerald-600 */
+            --card-bg: #ffffff;
+            --border-color: #d1fae5; /* emerald-100 */
+            --gemini-color: #4f46e5; /* indigo-600 */
+            --gemini-light: #e0e7ff; /* indigo-100 */
+        }
+        body {
+            background-color: var(--bg-cream);
+            color: var(--body-text);
+            font-family: 'Inter', sans-serif;
+        }
+        h1, h2, h3 {
+            color: var(--header-text);
+        }
+        .nav-button {
+            transition: all 0.3s ease;
+            border-bottom: 4px solid transparent;
+        }
+        .nav-active {
+            border-bottom-color: var(--accent);
+            color: var(--header-text);
+            font-weight: 600;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+        }
+        .form-input, .form-textarea, .form-select {
+            border: 1px solid #d1d5db; /* gray-300 */
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .form-input:focus, .form-textarea:focus, .form-select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--border-color);
+            outline: none;
+        }
+        .btn-primary {
+            background-color: var(--accent);
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        .btn-primary:hover {
+            background-color: var(--accent-dark);
+        }
+        .btn-gemini {
+            background-color: var(--gemini-color);
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        .btn-gemini:hover {
+            background-color: #4338ca; /* indigo-700 */
+        }
+        .loading-spinner {
+            border: 4px solid var(--gemini-light);
+            border-top: 4px solid var(--gemini-color);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
+
+        <!-- Cabeçalho e Navegação -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold mb-2">Planner Bariátrico</h1>
+            <p class="text-xl text-gray-600">Despertar & Florescer</p>
+        </header>
+
+        <nav class="flex justify-center bg-white rounded-lg shadow-sm mb-8 p-4 border border-[var(--border-color)]">
+            <button id="nav-despertar" class="nav-button text-lg md:text-xl font-medium px-6 py-3 text-gray-600">
+                🌟 Pré-Cirurgia (Despertar)
+            </button>
+            <button id="nav-florescer" class="nav-button text-lg md:text-xl font-medium px-6 py-3 text-gray-600">
+                🌸 Pós-Operatório (Florescer)
+            </button>
+        </nav>
+
+        <!-- Conteúdo Principal -->
+        <main>
+            <!-- ======================= -->
+            <!-- PÁGINA 1: DESPERTAR (PRÉ) -->
+            <!-- ======================= -->
+            <section id="page-despertar" class="page-content space-y-6">
+                <div class="card p-6 rounded-lg shadow-md">
+                    <h2 class="text-3xl font-bold mb-3">Fase 1: Pré-Cirurgia (Despertar)</h2>
+                    <p class="text-lg text-gray-700">
+                        Esta é a sua fase de preparação. O foco aqui é organização, autoconhecimento e planejamento emocional e logístico para o grande dia. Use as ferramentas abaixo para registrar suas reflexões, dúvidas e organizar seus compromissos.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Card: Reflexões -->
+                    <div class="card p-6 rounded-lg shadow-md space-y-4">
+                        <h3 class="text-2xl font-semibold">1. Autoconhecimento e Reflexões</h3>
+                        <div>
+                            <label for="reflexao-porque" class="block text-md font-medium text-gray-700 mb-1">Por que a Cirurgia?</label>
+                            <textarea id="reflexao-porque" rows="3" class="form-textarea w-full rounded-md p-2" placeholder="Qual é a minha motivação mais profunda? O que espero que mude?"></textarea>
+                        </div>
+                        <div>
+                            <label for="reflexao-gatilhos" class="block text-md font-medium text-gray-700 mb-1">Gatilhos Emocionais</label>
+                            <textarea id="reflexao-gatilhos" rows="3" class="form-textarea w-full rounded-md p-2" placeholder="Quais situações me levam a comer em excesso hoje?"></textarea>
+                        </div>
+                        <div>
+                            <label for="reflexao-compromisso" class="block text-md font-medium text-gray-700 mb-1">Meu Compromisso</label>
+                            <textarea id="reflexao-compromisso" rows="3" class="form-textarea w-full rounded-md p-2" placeholder="Qual é o meu nível de preparo com as mudanças permanentes?"></textarea>
+                        </div>
+
+                        <button id="btn-sugestoes-preparo" class="btn-gemini w-full rounded-md p-2 font-semibold flex items-center justify-center space-x-2">
+                            <span class="loading-spinner" id="loading-despertar"></span>
+                            <span id="text-despertar">Gerar Sugestões de Preparo Emocional ✨</span>
+                        </button>
+                        
+                        <div id="resultado-despertar" class="mt-4 p-3 bg-[var(--gemini-light)] rounded-md border border-[var(--gemini-color)] hidden">
+                            <h4 class="font-semibold text-[var(--gemini-color)] mb-2">Feedback do Gemini:</h4>
+                            <div id="resposta-despertar" class="whitespace-pre-wrap text-sm"></div>
+                        </div>
+
+                    </div>
+
+                    <!-- Card: Expectativas -->
+                    <div class="card p-6 rounded-lg shadow-md space-y-4">
+                        <h3 class="text-2xl font-semibold">4. Expectativas, Metas e Aprendizados</h3>
+                        <div>
+                            <label for="expectativa-maior" class="block text-md font-medium text-gray-700 mb-1">Minha Maior Expectativa</label>
+                            <textarea id="expectativa-maior" rows="2" class="form-textarea w-full rounded-md p-2"></textarea>
+                        </div>
+                        <div>
+                            <label for="expectativa-medo" class="block text-md font-medium text-gray-700 mb-1">Meu Maior Medo</label>
+                            <textarea id="expectativa-medo" rows="2" class="form-textarea w-full rounded-md p-2"></textarea>
+                        </div>
+                        <div>
+                            <label for="expectativa-aprendizado" class="block text-md font-medium text-gray-700 mb-1">O que Aprendi até Agora</label>
+                            <textarea id="expectativa-aprendizado" rows="2" class="form-textarea w-full rounded-md p-2" placeholder="Conhecimentos sobre alimentação, metabolismo..."></textarea>
+                        </div>
+                        <div>
+                            <label for="expectativa-duvidas" class="block text-md font-medium text-gray-700 mb-1">Espaço para Dúvidas (para a equipe)</label>
+                            <textarea id="expectativa-duvidas" rows="2" class="form-textarea w-full rounded-md p-2"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Card: Controle de Consultas -->
+                    <div class="card p-6 rounded-lg shadow-md lg:col-span-1">
+                        <h3 class="text-2xl font-semibold mb-4">2. Controle de Consultas e Exames</h3>
+                        <form id="form-consulta" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                            <input id="consulta-prof" type="text" class="form-input rounded-md p-2" placeholder="Profissional / Exame" required>
+                            <input id="consulta-data" type="date" class="form-input rounded-md p-2" required>
+                            <input id="consulta-obs" type="text" class="form-input rounded-md p-2 sm:col-span-2" placeholder="Observações">
+                            <button type="submit" class="btn-primary rounded-md p-2 sm:col-span-2">Adicionar Compromisso</button>
+                        </form>
+                        <div class="overflow-x-auto">
+                            <table class="w-full min-w-[500px]">
+                                <thead class="border-b-2 border-gray-200">
+                                    <tr class="text-left text-gray-600">
+                                        <th class="p-2">Profissional/Exame</th>
+                                        <th class="p-2">Data</th>
+                                        <th class="p-2">Observações</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-consultas">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Card: Planejamento Rotina -->
+                    <div class="card p-6 rounded-lg shadow-md lg:col-span-1">
+                        <h3 class="text-2xl font-semibold mb-4">3. Planejamento de Rotina para o Grande Dia</h3>
+                        <form id="form-tarefa" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                            <input id="tarefa-area" type="text" class="form-input rounded-md p-2" placeholder="Área (Ex: Casa, Logística)" required>
+                            <input id="tarefa-desc" type="text" class="form-input rounded-md p-2" placeholder="Tarefa" required>
+                            <input id="tarefa-data" type="date" class="form-input rounded-md p-2">
+                            <button type="submit" class="btn-primary rounded-md p-2 sm:col-span-2">Adicionar Tarefa</button>
+                        </form>
+                        <div class="overflow-x-auto">
+                            <table class="w-full min-w-[500px]">
+                                <thead class="border-b-2 border-gray-200">
+                                    <tr class="text-left text-gray-600">
+                                        <th class="p-2">Área</th>
+                                        <th class="p-2">Tarefa</th>
+                                        <th class="p-2">Data Limite</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-tarefas">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========================= -->
+            <!-- PÁGINA 2: FLORESCER (PÓS) -->
+            <!-- ========================= -->
+            <section id="page-florescer" class="page-content hidden space-y-6">
+                <div class="card p-6 rounded-lg shadow-md">
+                    <h2 class="text-3xl font-bold mb-3">Fase 2: Pós-Operatório (Florescer)</h2>
+                    <p class="text-lg text-gray-700">
+                        A cirurgia passou e o verdadeiro processo começa. Esta seção é seu dashboard para construir hábitos, acompanhar sua evolução e se reconectar com você. Registre seu peso, medidas e diários para visualizar seu progresso nos gráficos.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Coluna 1: ENTRADA DE DADOS -->
+                    <div class="lg:col-span-1 space-y-6">
+                        <!-- Card: Entrada de Peso e Medidas -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4">Adicionar Medição</h3>
+                            <form id="form-medidas" class="space-y-3">
+                                <input id="medida-data" type="date" class="form-input w-full rounded-md p-2" required>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <input id="medida-peso" type="number" step="0.1" class="form-input w-full rounded-md p-2" placeholder="Peso (kg)" required>
+                                    <input id="medida-cintura" type="number" class="form-input w-full rounded-md p-2" placeholder="Cintura (cm)">
+                                    <input id="medida-quadril" type="number" class="form-input w-full rounded-md p-2" placeholder="Quadril (cm)">
+                                    <input id="medida-braco" type="number" class="form-input w-full rounded-md p-2" placeholder="Braço (cm)">
+                                </div>
+                                <button type="submit" class="btn-primary w-full rounded-md p-2 font-semibold">Salvar Medição e Atualizar Gráficos</button>
+                            </form>
+                        </div>
+
+                        <!-- Card: Diário Alimentar -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4">3. Diário Alimentar</h3>
+                            <form id="form-diario-alimentar" class="space-y-3">
+                                <input id="alim-data" type="date" class="form-input w-full rounded-md p-2" required>
+                                <select id="alim-fase" class="form-select w-full rounded-md p-2" required>
+                                    <option value="">Selecione a Fase</option>
+                                    <option value="Líquida">Líquida</option>
+                                    <option value="Cremosa">Cremosa</option>
+                                    <option value="Pastosa">Pastosa</option>
+                                    <option value="Branda">Branda</option>
+                                    <option value="Sólida">Sólida</option>
+                                </select>
+                                <input id="alim-refeicao" type="text" class="form-input w-full rounded-md p-2" placeholder="Refeição (Ex: Almoço)" required>
+                                <input id="alim-alimento" type="text" class="form-input w-full rounded-md p-2" placeholder="Alimento/Bebida" required>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <input id="alim-volume" type="text" class="form-input w-full rounded-md p-2" placeholder="Volume (ml/g)">
+                                    <select id="alim-tolerancia" class="form-select w-full rounded-md p-2" required>
+                                        <option value="Ótima">Tolerância: Ótima</option>
+                                        <option value="Média">Tolerância: Média</option>
+                                        <option value="Ruim">Tolerância: Ruim</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn-primary w-full rounded-md p-2 font-semibold">Registrar Refeição</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Coluna 2: GRÁFICOS E VISUALIZAÇÃO -->
+                    <div class="lg:col-span-2 space-y-6">
+                        <!-- Card: Gráfico de Peso -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4 text-center">2. Evolução do Peso (kg)</h3>
+                            <div class="chart-container">
+                                <canvas id="pesoChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Card: Gráfico de Medidas -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4 text-center">2. Evolução das Medidas (cm)</h3>
+                            <div class="chart-container">
+                                <canvas id="medidasChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Coluna 3: LOGS E METAS (em 3 colunas) -->
+                    <div class="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Card: Diário Emocional -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4">4. Diário Emocional</h3>
+                            <form id="form-diario-emocional" class="space-y-3">
+                                <input id="emo-data" type="date" class="form-input w-full rounded-md p-2" required>
+                                <div>
+                                    <label for="emo-humor" class="block text-sm font-medium text-gray-700">Humor (1=Ruim, 5=Ótimo)</label>
+                                    <input id="emo-humor" type="range" min="1" max="5" step="1" class="w-full">
+                                </div>
+                                <input id="emo-foco" type="text" class="form-input w-full rounded-md p-2" placeholder="O que senti (Foco)? Ex: Ansiedade, Foco..." required>
+                                <textarea id="emo-lidei" rows="2" class="form-textarea w-full rounded-md p-2" placeholder="Como lidei com a emoção?"></textarea>
+                                <textarea id="emo-gratidao" rows="2" class="form-textarea w-full rounded-md p-2" placeholder="Gratidão e Metas para amanhã"></textarea>
+                                <button type="submit" class="btn-primary w-full rounded-md p-2 font-semibold">Registrar Emoção</button>
+                            </form>
+                        </div>
+                        
+                        <!-- Card: Metas e Bem-Estar -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4">5. Metas, Gratidão e Bem-Estar</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="metas-nao-escala" class="block text-md font-medium text-gray-700 mb-1">Minhas Metas de "Não-Escala"</label>
+                                    <textarea id="metas-nao-escala" rows="3" class="form-textarea w-full rounded-md p-2" placeholder="Ex: Correr 1km, vestir uma roupa guardada..."></textarea>
+                                </div>
+                                
+                                <h4 class="text-lg font-medium text-gray-700">Checklist de Bem-Estar Diário</h4>
+                                <div class="space-y-2">
+                                    <label class="flex items-center">
+                                        <input type="checkbox" class="h-5 w-5 text-[var(--accent)] rounded border-gray-300 focus:ring-[var(--accent)]">
+                                        <span class="ml-2 text-gray-700">30 min de exercício/movimento</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" class="h-5 w-5 text-[var(--accent)] rounded border-gray-300 focus:ring-[var(--accent)]">
+                                        <span class="ml-2 text-gray-700">Sono de 7-9 horas</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" class="h-5 w-5 text-[var(--accent)] rounded border-gray-300 focus:ring-[var(--accent)]">
+                                        <span class="ml-2 text-gray-700">Meditação / Momento de Calma</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" class="h-5 w-5 text-[var(--accent)] rounded border-gray-300 focus:ring-[var(--accent)]">
+                                        <span class="ml-2 text-gray-700">Contato social positivo</span>
+                                    </label>
+                                </div>
+
+                                <div>
+                                    <label for="metas-lema" class="block text-md font-medium text-gray-700 mb-1">Meu Lema Atual</label>
+                                    <input id="metas-lema" type="text" class="form-input w-full rounded-md p-2">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card: Logs Recentes -->
+                        <div class="card p-6 rounded-lg shadow-md md:col-span-2">
+                            <h3 class="text-2xl font-semibold mb-4">Registros Recentes</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <h4 class="text-lg font-medium text-gray-700 mb-2">Últimas Refeições</h4>
+                                    <div class="overflow-x-auto max-h-48 overflow-y-auto">
+                                        <table class="w-full min-w-[400px]">
+                                            <thead class="border-b-2 border-gray-200 text-left text-sm text-gray-600">
+                                                <tr><th class="p-1">Data</th><th class="p-1">Refeição</th><th class="p-1">Alimento</th><th class="p-1">Tolerância</th></tr>
+                                            </thead>
+                                            <tbody id="tbody-diario-alimentar"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4 class="text-lg font-medium text-gray-700 mb-2">Últimas Emoções</h4>
+                                    <div class="overflow-x-auto max-h-48 overflow-y-auto">
+                                        <table class="w-full min-w-[400px]">
+                                            <thead class="border-b-2 border-gray-200 text-left text-sm text-gray-600">
+                                                <tr><th class="p-1">Data</th><th class="p-1">Humor</th><th class="p-1">Foco</th><th class="p-1">Como Lidei</th></tr>
+                                            </thead>
+                                            <tbody id="tbody-diario-emocional"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <button id="btn-analisar-logs" class="btn-gemini w-full rounded-md p-2 font-semibold flex items-center justify-center space-x-2">
+                                    <span class="loading-spinner" id="loading-florescer"></span>
+                                    <span id="text-florescer">Analisar Logs e Sugerir Foco ✨</span>
+                                </button>
+
+                                <div id="resultado-florescer" class="mt-4 p-3 bg-[var(--gemini-light)] rounded-md border border-[var(--gemini-color)] hidden">
+                                    <h4 class="font-semibold text-[var(--gemini-color)] mb-2">Análise de Tendência e Foco Sugerido:</h4>
+                                    <div id="resposta-florescer" class="whitespace-pre-wrap text-sm"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="text-center mt-12 py-6 border-t border-gray-200">
+            <p class="text-gray-500">Criado com foco na sua jornada. Boa sorte!</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            const navDespertar = document.getElementById('nav-despertar');
+            const navFlorescer = document.getElementById('nav-florescer');
+            const pageDespertar = document.getElementById('page-despertar');
+            const pageFlorescer = document.getElementById('page-florescer');
+
+            const formConsulta = document.getElementById('form-consulta');
+            const tbodyConsultas = document.getElementById('tbody-consultas');
+            const formTarefa = document.getElementById('form-tarefa');
+            const tbodyTarefas = document.getElementById('tbody-tarefas');
+            
+            const formMedidas = document.getElementById('form-medidas');
+            const formDiarioAlimentar = document.getElementById('form-diario-alimentar');
+            const tbodyDiarioAlimentar = document.getElementById('tbody-diario-alimentar');
+            const formDiarioEmocional = document.getElementById('form-diario-emocional');
+            const tbodyDiarioEmocional = document.getElementById('tbody-diario-emocional');
+
+            const btnSugestoesPreparo = document.getElementById('btn-sugestoes-preparo');
+            const btnAnalisarLogs = document.getElementById('btn-analisar-logs');
+            const resultadoDespertar = document.getElementById('resultado-despertar');
+            const respostaDespertar = document.getElementById('resposta-despertar');
+            const loadingDespertar = document.getElementById('loading-despertar');
+            const textDespertar = document.getElementById('text-despertar');
+            const resultadoFlorescer = document.getElementById('resultado-florescer');
+            const respostaFlorescer = document.getElementById('resposta-florescer');
+            const loadingFlorescer = document.getElementById('loading-florescer');
+            const textFlorescer = document.getElementById('text-florescer');
+
+            let pesoChartInstance = null;
+            let medidasChartInstance = null;
+            let medicoesData = [];
+
+            const API_KEY = ""; 
+            const API_URL_BASE = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+
+            async function callGeminiApi(prompt, systemInstruction) {
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    systemInstruction: { parts: [{ text: systemInstruction }] },
+                };
+
+                let response = null;
+                const maxRetries = 5;
+                let delay = 1000;
+
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        response = await fetch(API_URL_BASE, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.status === 429 && i < maxRetries - 1) {
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            delay *= 2;
+                            continue;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(`API error: ${response.status} ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+                        return result.candidates?.[0]?.content?.parts?.[0]?.text || "Erro ao processar a resposta do LLM.";
+
+                    } catch (error) {
+                        console.error("Erro na chamada da API:", error);
+                        if (i === maxRetries - 1) throw error;
+                    }
+                }
+                return "Desculpe, a API não pôde gerar uma resposta após várias tentativas.";
+            }
+
+            // --- LÓGICA DO DESPERTAR (PRÉ-OP) ---
+
+            btnSugestoesPreparo.addEventListener('click', async () => {
+                const porque = document.getElementById('reflexao-porque').value;
+                const gatilhos = document.getElementById('reflexao-gatilhos').value;
+                const compromisso = document.getElementById('reflexao-compromisso').value;
+                const expectativa = document.getElementById('expectativa-maior').value;
+                const medo = document.getElementById('expectativa-medo').value;
+
+                if (!porque && !medo) {
+                    respostaDespertar.textContent = "Por favor, preencha pelo menos as seções 'Por que a Cirurgia?' ou 'Meu Maior Medo' para que eu possa gerar sugestões focadas.";
+                    resultadoDespertar.classList.remove('hidden');
+                    return;
+                }
+
+                const prompt = `Analise as seguintes reflexões e medos pré-bariátrica e gere uma resposta de coach motivacional (apenas texto) com 3 a 5 passos práticos e positivos de preparo emocional focado nos pontos levantados. Use bullet points. 
+                - Motivação (Por que a Cirurgia?): ${porque}
+                - Desafios (Gatilhos Emocionais): ${gatilhos}
+                - Compromisso: ${compromisso}
+                - Expectativa Principal: ${expectativa}
+                - Maior Medo: ${medo}`;
+
+                const systemInstruction = "Você é um conselheiro bariátrico experiente. Sua função é analisar as reflexões do paciente e fornecer um feedback empático, motivacional e com sugestões práticas e realistas para a preparação mental e emocional para a cirurgia e o pós-operatório.";
+                
+                textDespertar.classList.add('hidden');
+                loadingDespertar.style.display = 'block';
+                resultadoDespertar.classList.remove('hidden');
+                respostaDespertar.textContent = "Analisando suas reflexões... isso pode levar alguns segundos.";
+
+                try {
+                    const responseText = await callGeminiApi(prompt, systemInstruction);
+                    respostaDespertar.textContent = responseText;
+                } catch (error) {
+                    respostaDespertar.textContent = "Ocorreu um erro ao conectar com o assistente de preparo. Tente novamente mais tarde.";
+                } finally {
+                    loadingDespertar.style.display = 'none';
+                    textDespertar.classList.remove('hidden');
+                }
+            });
+
+            // --- LÓGICA DO FLORESCER (PÓS-OP) ---
+
+            btnAnalisarLogs.addEventListener('click', async () => {
+                const alimentares = Array.from(tbodyDiarioAlimentar.rows).map(row => ({
+                    data: row.cells[0].textContent,
+                    fase: row.cells[1].textContent, 
+                    alimento: row.cells[2].textContent,
+                    tolerancia: row.cells[3].textContent,
+                }));
+
+                const emocionais = Array.from(tbodyDiarioEmocional.rows).map(row => ({
+                    data: row.cells[0].textContent,
+                    humor: row.cells[1].textContent,
+                    foco: row.cells[2].textContent,
+                }));
+
+                if (alimentares.length === 0 && emocionais.length === 0) {
+                    respostaFlorescer.textContent = "Por favor, registre dados no Diário Alimentar e no Diário Emocional para que eu possa fazer uma análise.";
+                    resultadoFlorescer.classList.remove('hidden');
+                    return;
+                }
+
+                const alimentaresText = alimentares.map(a => 
+                    `[${a.data}, Fase: ${a.fase}, Alimento: ${a.alimento}, Tolerância: ${a.tolerancia}]`
+                ).join('\n');
+                
+                const emocionaisText = emocionais.map(e => 
+                    `[${e.data}, Humor: ${e.humor}, Foco: ${e.foco}]`
+                ).join('\n');
+
+                const prompt = `Analise os logs de bem-estar pós-bariátrica e forneça um breve resumo de tendência e uma sugestão de FOCO para a próxima semana. A análise deve correlacionar a tolerância alimentar e as emoções registradas. Formate a resposta com um título em negrito e 3 bullet points.
+                
+                Logs Alimentares (Mais Recentes Primeiro):
+                ${alimentaresText}
+
+                Logs Emocionais (Mais Recentes Primeiro):
+                ${emocionaisText}`;
+
+                const systemInstruction = "Você é um analista de tendências de bem-estar pós-bariátrica. Seu objetivo é identificar padrões (ex: 'Baixa tolerância correlacionada com ansiedade') e sugerir um único FOCO prático e motivacional (ex: 'Focar em técnicas de mastigação', 'Aumentar a atenção plena nas refeições', 'Explorar exercícios de respiração para ansiedade'). Mantenha o tom profissional e encorajador.";
+
+                textFlorescer.classList.add('hidden');
+                loadingFlorescer.style.display = 'block';
+                resultadoFlorescer.classList.remove('hidden');
+                respostaFlorescer.textContent = "Analisando seus logs de evolução... isso pode levar alguns segundos.";
+
+                try {
+                    const responseText = await callGeminiApi(prompt, systemInstruction);
+                    respostaFlorescer.textContent = responseText;
+                } catch (error) {
+                    respostaFlorescer.textContent = "Ocorreu um erro ao conectar com o assistente de análise. Tente novamente mais tarde.";
+                } finally {
+                    loadingFlorescer.style.display = 'none';
+                    textFlorescer.classList.remove('hidden');
+                }
+            });
+
+
+            // --- FUNÇÕES DE NAVEGAÇÃO E GRÁFICOS (ORIGINAIS) ---
+
+            function showPage(pageId) {
+                if (pageId === 'page-despertar') {
+                    pageDespertar.classList.remove('hidden');
+                    pageFlorescer.classList.add('hidden');
+                    navDespertar.classList.add('nav-active');
+                    navFlorescer.classList.remove('nav-active');
+                } else {
+                    pageDespertar.classList.add('hidden');
+                    pageFlorescer.classList.remove('hidden');
+                    navDespertar.classList.remove('nav-active');
+                    navFlorescer.classList.add('nav-active');
+                    initCharts();
+                }
+            }
+
+            navDespertar.addEventListener('click', () => showPage('page-despertar'));
+            navFlorescer.addEventListener('click', () => showPage('page-florescer'));
+
+            showPage('page-despertar');
+
+            function addRowToTable(tbody, cells) {
+                const newRow = tbody.insertRow(0);
+                cells.forEach((cellText, index) => {
+                    const newCell = newRow.insertCell(index);
+                    newCell.textContent = cellText || 'N/A';
+                    newCell.classList.add('p-2', 'border-b', 'border-gray-100', 'text-sm');
+                });
+            }
+
+            formConsulta.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const prof = document.getElementById('consulta-prof').value;
+                const data = document.getElementById('consulta-data').value;
+                const obs = document.getElementById('consulta-obs').value;
+                addRowToTable(tbodyConsultas, [prof, data, obs]);
+                formConsulta.reset();
+            });
+
+            formTarefa.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const area = document.getElementById('tarefa-area').value;
+                const desc = document.getElementById('tarefa-desc').value;
+                const data = document.getElementById('tarefa-data').value;
+                addRowToTable(tbodyTarefas, [area, desc, data]);
+                formTarefa.reset();
+            });
+
+            formDiarioAlimentar.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const data = document.getElementById('alim-data').value;
+                const fase = document.getElementById('alim-fase').value; 
+                const refeicao = document.getElementById('alim-refeicao').value;
+                const alimento = document.getElementById('alim-alimento').value;
+                const tolerancia = document.getElementById('alim-tolerancia').value;
+                addRowToTable(tbodyDiarioAlimentar, [data, refeicao, alimento, tolerancia]);
+                formDiarioAlimentar.reset();
+            });
+
+            formDiarioEmocional.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const data = document.getElementById('emo-data').value;
+                const humor = document.getElementById('emo-humor').value;
+                const foco = document.getElementById('emo-foco').value;
+                const lidei = document.getElementById('emo-lidei').value;
+                addRowToTable(tbodyDiarioEmocional, [data, `${humor}/5`, foco, lidei]);
+                formDiarioEmocional.reset();
+            });
+
+            formMedidas.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const data = document.getElementById('medida-data').value;
+                const peso = parseFloat(document.getElementById('medida-peso').value);
+                const cintura = parseFloat(document.getElementById('medida-cintura').value) || null;
+                const quadril = parseFloat(document.getElementById('medida-quadril').value) || null;
+                const braco = parseFloat(document.getElementById('medida-braco').value) || null;
+                
+                medicoesData.push({ data, peso, cintura, quadril, braco });
+                medicoesData.sort((a, b) => new Date(a.data) - new Date(b.data));
+                
+                updateCharts();
+                formMedidas.reset();
+            });
+
+            function initCharts() {
+                if (pesoChartInstance) return;
+
+                const chartOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: '#4b5563' } },
+                        y: { ticks: { color: '#4b5563' }, beginAtZero: false }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    }
+                };
+
+                const ctxPeso = document.getElementById('pesoChart').getContext('2d');
+                pesoChartInstance = new Chart(ctxPeso, {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Peso (kg)',
+                        data: [],
+                        borderColor: 'rgb(4, 120, 87)',
+                        backgroundColor: 'rgba(4, 120, 87, 0.1)',
+                        fill: true,
+                        tension: 0.1
+                    }] },
+                    options: chartOptions
+                });
+
+                const ctxMedidas = document.getElementById('medidasChart').getContext('2d');
+                medidasChartInstance = new Chart(ctxMedidas, {
+                    type: 'line',
+                    data: { labels: [], datasets: [
+                        {
+                            label: 'Cintura (cm)',
+                            data: [],
+                            borderColor: 'rgb(13, 148, 136)',
+                            backgroundColor: 'rgba(13, 148, 136, 0.1)',
+                            fill: false,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Quadril (cm)',
+                            data: [],
+                            borderColor: 'rgb(8, 145, 178)',
+                            backgroundColor: 'rgba(8, 145, 178, 0.1)',
+                            fill: false,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Braço (cm)',
+                            data: [],
+                            borderColor: 'rgb(6, 182, 212)',
+                            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                            fill: false,
+                            tension: 0.1
+                        }
+                    ] },
+                    options: chartOptions
+                });
+            }
+            
+            function updateCharts() {
+                if (!pesoChartInstance || !medidasChartInstance) initCharts();
+
+                const labels = medicoesData.map(d => d.data);
+                
+                pesoChartInstance.data.labels = labels;
+                pesoChartInstance.data.datasets[0].data = medicoesData.map(d => d.peso);
+                pesoChartInstance.update();
+
+                medidasChartInstance.data.labels = labels;
+                medidasChartInstance.data.datasets[0].data = medicoesData.map(d => d.cintura);
+                medidasChartInstance.data.datasets[1].data = medicoesData.map(d => d.quadril);
+                medidasChartInstance.data.datasets[2].data = medicoesData.map(d => d.braco);
+                medidasChartInstance.update();
+            }
+        });
+    </script>
+</body>
+</html>
