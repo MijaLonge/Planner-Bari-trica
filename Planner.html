@@ -285,6 +285,31 @@
                                 <button type="submit" class="btn-primary w-full rounded-md p-2 font-semibold">Registrar Refeição</button>
                             </form>
                         </div>
+
+                        <!-- Card: Geração de Receitas por Fase -->
+                        <div class="card p-6 rounded-lg shadow-md">
+                            <h3 class="text-2xl font-semibold mb-4">6. Sugestão de Receitas ✨</h3>
+                            <p class="text-sm text-gray-600 mb-3">Escolha sua fase atual e gere ideias de receitas focadas em proteína e tolerância.</p>
+                            <div class="space-y-3">
+                                <select id="recipe-fase" class="form-select w-full rounded-md p-2" required>
+                                    <option value="">Selecione a Fase Atual</option>
+                                    <option value="Líquida">Fase Líquida (Ex: Caldos, Sucos coados)</option>
+                                    <option value="Cremosa">Fase Cremosa (Ex: Purês, Sopas cremosas)</option>
+                                    <option value="Pastosa">Fase Pastosa (Ex: Ovos mexidos, Carne desfiada)</option>
+                                    <option value="Branda">Fase Branda (Ex: Frango cozido, Peixe, Legumes macios)</option>
+                                    <option value="Sólida">Fase Sólida (Ex: Alimentação regular balanceada)</option>
+                                </select>
+                                <button id="btn-gerar-receita" class="btn-gemini w-full rounded-md p-2 font-semibold flex items-center justify-center space-x-2">
+                                    <span class="loading-spinner" id="loading-receita"></span>
+                                    <span id="text-receita">Gerar Ideias de Receitas por Fase ✨</span>
+                                </button>
+                            </div>
+                            <div id="resultado-receita" class="mt-4 p-3 bg-[var(--gemini-light)] rounded-md border border-[var(--gemini-color)] hidden">
+                                <h4 class="font-semibold text-[var(--gemini-color)] mb-2">Ideias do Chef Gemini:</h4>
+                                <div id="resposta-receita" class="whitespace-pre-wrap text-sm"></div>
+                            </div>
+                        </div>
+
                     </div>
 
                     <!-- Coluna 2: GRÁFICOS E VISUALIZAÇÃO -->
@@ -357,6 +382,18 @@
                                     <label for="metas-lema" class="block text-md font-medium text-gray-700 mb-1">Meu Lema Atual</label>
                                     <input id="metas-lema" type="text" class="form-input w-full rounded-md p-2">
                                 </div>
+                                
+                                <!-- NEW TTS FEATURE -->
+                                <div class="mt-4 pt-4 border-t border-gray-200">
+                                    <h4 class="text-lg font-semibold text-[var(--gemini-color)] mb-2">Motivação por Voz ✨</h4>
+                                    <p class="text-sm text-gray-600 mb-3">Ouça seu lema atual em voz alta para reforçar sua meta.</p>
+                                    <button id="btn-ler-lema" class="btn-gemini w-full rounded-md p-2 font-semibold flex items-center justify-center space-x-2">
+                                        <span class="loading-spinner" id="loading-tts"></span>
+                                        <span id="text-tts">Ouvir Lema Motivacional</span>
+                                    </button>
+                                    <audio id="audio-player" class="w-full mt-3 hidden" controls></audio>
+                                </div>
+                                
                             </div>
                         </div>
 
@@ -438,12 +475,147 @@
             const loadingFlorescer = document.getElementById('loading-florescer');
             const textFlorescer = document.getElementById('text-florescer');
 
+            const btnGerarReceita = document.getElementById('btn-gerar-receita');
+            const loadingReceita = document.getElementById('loading-receita');
+            const textReceita = document.getElementById('text-receita');
+            const resultadoReceita = document.getElementById('resultado-receita');
+            const respostaReceita = document.getElementById('resposta-receita');
+            
+            // New TTS elements
+            const btnLerLema = document.getElementById('btn-ler-lema');
+            const metasLema = document.getElementById('metas-lema');
+            const loadingTts = document.getElementById('loading-tts');
+            const textTts = document.getElementById('text-tts');
+            const audioPlayer = document.getElementById('audio-player');
+
+
             let pesoChartInstance = null;
             let medidasChartInstance = null;
             let medicoesData = [];
 
             const API_KEY = ""; 
             const API_URL_BASE = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+            const TTS_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${API_KEY}`;
+            
+            // --- TTS UTILITY FUNCTIONS ---
+            
+            function base64ToArrayBuffer(base64) {
+                const binaryString = atob(base64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                return bytes.buffer;
+            }
+
+            function pcmToWav(pcmData, sampleRate) {
+                const pcm16 = pcmData; 
+                const numChannels = 1;
+                const bitsPerSample = 16;
+                const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+                const blockAlign = numChannels * (bitsPerSample / 8);
+                const buffer = new ArrayBuffer(44 + pcm16.byteLength);
+                const view = new DataView(buffer);
+                let offset = 0;
+
+                function writeString(str) {
+                    for (let i = 0; i < str.length; i++) {
+                        view.setUint8(offset++, str.charCodeAt(i));
+                    }
+                }
+
+                writeString('RIFF'); offset += 4; 
+                view.setUint32(offset, 36 + pcm16.byteLength, true); offset += 4;
+                writeString('WAVE'); offset += 4;
+                writeString('fmt '); offset += 4;
+                view.setUint32(offset, 16, true); offset += 4;
+                view.setUint16(offset, 1, true); offset += 2;
+                view.setUint16(offset, numChannels, true); offset += 2;
+                view.setUint32(offset, sampleRate, true); offset += 4;
+                view.setUint32(offset, byteRate, true); offset += 4;
+                view.setUint16(offset, blockAlign, true); offset += 2;
+                view.setUint16(offset, bitsPerSample, true); offset += 2;
+                writeString('data'); offset += 4;
+                view.setUint32(offset, pcm16.byteLength, true); offset += 4;
+                
+                const pcmBytes = new Uint8Array(pcm16.buffer);
+                for(let i = 0; i < pcmBytes.length; i++) {
+                    view.setUint8(offset++, pcmBytes[i]);
+                }
+
+                return new Blob([buffer], { type: 'audio/wav' });
+            }
+
+            async function callGeminiTtsApi(textToSpeak) {
+                const payload = {
+                    contents: [{
+                        parts: [{ text: textToSpeak }]
+                    }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                prebuiltVoiceConfig: { voiceName: "Kore" }
+                            }
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+
+                let response = null;
+                const maxRetries = 5;
+                let delay = 1000;
+
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        response = await fetch(TTS_API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.status === 429 && i < maxRetries - 1) {
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            delay *= 2;
+                            continue;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+                        const part = result?.candidates?.[0]?.content?.parts?.[0];
+                        
+                        if (part && part.inlineData) {
+                            const audioData = part.inlineData.data;
+                            const mimeType = part.inlineData.mimeType;
+                            
+                            if (mimeType.startsWith("audio/L16")) {
+                                // Extract sample rate (e.g., audio/L16;rate=24000)
+                                const match = mimeType.match(/rate=(\d+)/);
+                                const sampleRate = match ? parseInt(match[1], 10) : 24000; 
+
+                                const pcmBuffer = base64ToArrayBuffer(audioData);
+                                const pcm16 = new Int16Array(pcmBuffer);
+                                const wavBlob = pcmToWav(pcm16, sampleRate);
+                                return URL.createObjectURL(wavBlob);
+                            } else {
+                                throw new Error("Formato de áudio inesperado.");
+                            }
+                        }
+                        return null;
+
+                    } catch (error) {
+                        console.error("Erro na chamada da API TTS:", error);
+                        if (i === maxRetries - 1) throw error;
+                    }
+                }
+                return null;
+            }
+            
+            // --- REGULAR GEMINI API CALL (FOR TEXT) ---
 
             async function callGeminiApi(prompt, systemInstruction) {
                 const payload = {
@@ -483,6 +655,42 @@
                 }
                 return "Desculpe, a API não pôde gerar uma resposta após várias tentativas.";
             }
+
+            // --- LÓGICA DO TTS: LER LEMA ---
+
+            btnLerLema.addEventListener('click', async () => {
+                const lema = metasLema.value.trim();
+                
+                if (lema.length === 0) {
+                    audioPlayer.classList.add('hidden');
+                    alert("Por favor, digite seu 'Lema Atual' antes de tentar ouvi-lo.");
+                    return;
+                }
+                
+                textTts.classList.add('hidden');
+                loadingTts.style.display = 'block';
+                audioPlayer.classList.add('hidden');
+
+                const ttsPrompt = `Diga com uma voz motivadora: ${lema}`;
+
+                try {
+                    const audioUrl = await callGeminiTtsApi(ttsPrompt);
+                    
+                    if (audioUrl) {
+                        audioPlayer.src = audioUrl;
+                        audioPlayer.classList.remove('hidden');
+                        audioPlayer.play();
+                    } else {
+                        alert("Não foi possível gerar o áudio. Tente novamente.");
+                    }
+                } catch (error) {
+                    alert("Erro ao processar a síntese de voz. Verifique o console para detalhes.");
+                } finally {
+                    loadingTts.style.display = 'none';
+                    textTts.classList.remove('hidden');
+                }
+            });
+
 
             // --- LÓGICA DO DESPERTAR (PRÉ-OP) ---
 
@@ -524,7 +732,7 @@
                 }
             });
 
-            // --- LÓGICA DO FLORESCER (PÓS-OP) ---
+            // --- LÓGICA DO FLORESCER (PÓS-OP) - ANÁLISE DE LOGS ---
 
             btnAnalisarLogs.addEventListener('click', async () => {
                 const alimentares = Array.from(tbodyDiarioAlimentar.rows).map(row => ({
@@ -580,6 +788,36 @@
                 }
             });
 
+            // --- LÓGICA DO FLORESCER (PÓS-OP) - RECEITA ---
+
+            btnGerarReceita.addEventListener('click', async () => {
+                const fase = document.getElementById('recipe-fase').value;
+                
+                if (!fase) {
+                    respostaReceita.textContent = "Por favor, selecione sua Fase Atual para gerar ideias de receitas.";
+                    resultadoReceita.classList.remove('hidden');
+                    return;
+                }
+
+                const prompt = `Gere 3 ideias de receitas (título, ingredientes e preparo) adequadas para a Fase ${fase} da dieta bariátrica. Priorize alto teor de proteína e facilidade de digestão. Use formatação de lista para facilitar a leitura.`;
+
+                const systemInstruction = "Você é um nutricionista culinário focado em receitas bariátricas. Seu objetivo é fornecer receitas seguras, ricas em proteína e adequadas à fase alimentar do paciente (Líquida, Cremosa, Pastosa, Branda, Sólida).";
+                
+                textReceita.classList.add('hidden');
+                loadingReceita.style.display = 'block';
+                resultadoReceita.classList.remove('hidden');
+                respostaReceita.textContent = `Buscando 3 ideias de receitas para a Fase ${fase}...`;
+
+                try {
+                    const responseText = await callGeminiApi(prompt, systemInstruction);
+                    respostaReceita.textContent = responseText;
+                } catch (error) {
+                    respostaReceita.textContent = "Ocorreu um erro ao conectar com o assistente de receitas. Tente novamente mais tarde.";
+                } finally {
+                    loadingReceita.style.display = 'none';
+                    textReceita.classList.remove('hidden');
+                }
+            });
 
             // --- FUNÇÕES DE NAVEGAÇÃO E GRÁFICOS (ORIGINAIS) ---
 
